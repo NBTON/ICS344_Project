@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}SecureChat - Chat{% endblock %}
+
+{% block nav_items %}
+<span class="nav-user" id="nav-user-info">
+    <span class="user-status online"></span>
+    <span id="current-user">Loading...</span>
+</span>
+<a href="{{ url_for('attack_lab') }}" class="nav-link">Attack Lab</a>
+<button id="logout-btn" class="btn btn-sm btn-secondary">Logout</button>
+{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <!-- Left Sidebar - User List -->
+    <aside class="sidebar sidebar-left">
+        <div class="sidebar-header">
+            <h3>Online Users</h3>
+            <button id="refresh-users-btn" class="btn btn-sm btn-icon" title="Refresh">🔄</button>
+        </div>
+        <div class="user-list" id="user-list">
+            <div class="loading-users">
+                <div class="loading-spinner small"></div>
+                <span>Loading users...</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+        <!-- Chat Header -->
+        <div class="chat-header" id="chat-header">
+            <div class="chat-partner-info">
+                <span class="chat-partner-name" id="chat-partner-name">Select a user to start chatting</span>
+                <span class="chat-partner-status" id="chat-partner-status"></span>
+            </div>
+            <div class="chat-actions">
+                <button id="key-exchange-btn" class="btn btn-sm btn-primary" style="display: none;">
+                    🔑 Exchange Keys
+                </button>
+            </div>
+        </div>
+
+        <!-- Messages Container -->
+        <div class="messages-container" id="messages-container">
+            <div class="no-chat-selected">
+                <div class="no-chat-icon">💬</div>
+                <p>Select a user from the list to start a secure conversation</p>
+            </div>
+        </div>
+
+        <!-- Message Input -->
+        <div class="message-input-container" id="message-input-container" style="display: none;">
+            <form id="message-form" class="message-form">
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        id="message-input" 
+                        class="message-input" 
+                        placeholder="Type your encrypted message..."
+                        autocomplete="off"
+                        maxlength="4096"
+                    >
+                    <button type="submit" id="send-btn" class="btn btn-primary btn-send">
+                        <span class="btn-text">Send</span>
+                        <span class="btn-icon">📤</span>
+                    </button>
+                </div>
+                <div class="input-info">
+                    <span class="encryption-indicator" id="encryption-indicator">
+                        <span class="indicator-icon">🔒</span>
+                        <span class="indicator-text">End-to-end encrypted</span>
+                    </span>
+                    <span class="char-count" id="char-count">0/4096</span>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <!-- Right Sidebar - Encryption Status -->
+    <aside class="sidebar sidebar-right">
+        <div class="sidebar-header">
+            <h3>Security Status</h3>
+        </div>
+        
+        <div class="status-panel">
+            <div class="status-section">
+                <h4>Your Identity</h4>
+                <div class="status-item">
+                    <span class="status-label">User ID:</span>
+                    <span class="status-value" id="status-user-id">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Key Fingerprint:</span>
+                    <span class="status-value fingerprint" id="status-fingerprint">-</span>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <h4>Session Status</h4>
+                <div class="status-item">
+                    <span class="status-label">Session Key:</span>
+                    <span class="status-value" id="status-session-key">
+                        <span class="status-badge badge-warning">Not established</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Session ID:</span>
+                    <span class="status-value" id="status-session-id">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Expires:</span>
+                    <span class="status-value" id="status-session-expires">-</span>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <h4>Message Security</h4>
+                <div class="status-item">
+                    <span class="status-label">Encryption:</span>
+                    <span class="status-value" id="status-encryption">
+                        <span class="status-badge badge-success">AES-256-GCM</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Signatures:</span>
+                    <span class="status-value" id="status-signatures">
+                        <span class="status-badge badge-success">RSA-PSS</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Last Verified:</span>
+                    <span class="status-value" id="status-last-verified">-</span>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <h4>Connection</h4>
+                <div class="status-item">
+                    <span class="status-label">WebSocket:</span>
+                    <span class="status-value" id="status-websocket">
+                        <span class="status-badge badge-warning">Connecting...</span>
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Latency:</span>
+                    <span class="status-value" id="status-latency">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="security-actions">
+            <button id="verify-keys-btn" class="btn btn-sm btn-secondary btn-full">
+                🔍 Verify Keys
+            </button>
+            <button id="rotate-session-btn" class="btn btn-sm btn-secondary btn-full">
+                🔄 Rotate Session Key
+            </button>
+        </div>
+    </aside>
+</div>
+
+<!-- Typing indicator template -->
+<template id="typing-indicator-template">
+    <div class="typing-indicator">
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+    </div>
+</template>
+
+<!-- Message template -->
+<template id="message-template">
+    <div class="message">
+        <div class="message-content">
+            <p class="message-text"></p>
+            <div class="message-meta">
+                <span class="message-time"></span>
+                <span class="message-status"></span>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Key verification modal -->
+<div id="verify-modal" class="modal" style="display: none;">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>🔐 Verify Encryption Keys</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Compare these fingerprints with your chat partner to verify the secure connection:</p>
+            
+            <div class="fingerprint-display">
+                <div class="fingerprint-section">
+                    <label>Your Key Fingerprint:</label>
+                    <code id="verify-your-fingerprint"></code>
+                </div>
+                <div class="fingerprint-section">
+                    <label>Partner's Key Fingerprint:</label>
+                    <code id="verify-partner-fingerprint"></code>
+                </div>
+                <div class="fingerprint-section">
+                    <label>Session Verification Code:</label>
+                    <code id="verify-session-code"></code>
+                </div>
+            </div>
+            
+            <div class="verify-instructions">
+                <p><strong>How to verify:</strong></p>
+                <ol>
+                    <li>Contact your partner through another channel (phone, in person)</li>
+                    <li>Compare the fingerprints shown above</li>
+                    <li>If they match, your conversation is secure</li>
+                </ol>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary modal-close-btn">Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crypto.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+<script>
+    // Initialize chat when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check if user is logged in
+        const userId = localStorage.getItem('securechat_user_id');
+        if (!userId) {
+            window.location.href = '/';
+            return;
+        }
+
+        // Initialize the chat application
+        SecureChatApp.init(userId);
+    });
+</script>
+{% endblock %}

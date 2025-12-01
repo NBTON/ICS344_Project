@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+
+{% block title %}SecureChat - Attack Lab{% endblock %}
+
+{% block nav_items %}
+<a href="{{ url_for('chat') }}" class="nav-link">Back to Chat</a>
+{% endblock %}
+
+{% block content %}
+<div class="attack-lab-container">
+    <header class="lab-header">
+        <h1>🧪 SecureChat Attack Lab</h1>
+        <p class="lab-description">
+            Explore security vulnerabilities and their defenses through interactive demonstrations.
+            Each attack is shown with and without protective measures enabled.
+        </p>
+    </header>
+
+    <!-- Attack Type Tabs -->
+    <nav class="attack-tabs">
+        <button class="tab-btn active" data-attack="replay">
+            <span class="tab-icon">🔄</span>
+            <span class="tab-text">Replay Attack</span>
+        </button>
+        <button class="tab-btn" data-attack="tampering">
+            <span class="tab-icon">✏️</span>
+            <span class="tab-text">Ciphertext Tampering</span>
+        </button>
+        <button class="tab-btn" data-attack="mitm">
+            <span class="tab-icon">👤</span>
+            <span class="tab-text">MITM Attack</span>
+        </button>
+        <button class="tab-btn" data-attack="dos">
+            <span class="tab-icon">💥</span>
+            <span class="tab-text">DoS Attack</span>
+        </button>
+    </nav>
+
+    <!-- Attack Panels -->
+    <div class="attack-panels">
+        
+        <!-- Replay Attack Panel -->
+        <section class="attack-panel active" id="replay-panel">
+            <div class="attack-info">
+                <h2>🔄 Replay Attack</h2>
+                <div class="attack-description">
+                    <p>
+                        A replay attack captures valid encrypted messages and resends them later.
+                        Without proper protection, the server cannot distinguish between original 
+                        and replayed messages, allowing attackers to duplicate transactions or 
+                        actions.
+                    </p>
+                    <div class="attack-details">
+                        <h4>How it works:</h4>
+                        <ol>
+                            <li>Attacker intercepts an encrypted message between Alice and Bob</li>
+                            <li>The message is valid and properly encrypted</li>
+                            <li>Attacker saves the message and resends it later</li>
+                            <li>Without defense: Server accepts the duplicate message</li>
+                            <li>With defense: Timestamp and nonce validation reject the replay</li>
+                        </ol>
+                    </div>
+                    <div class="defense-info">
+                        <h4>Defense Mechanism:</h4>
+                        <ul>
+                            <li><strong>Timestamp validation:</strong> Messages must be within 5-minute window</li>
+                            <li><strong>Nonce tracking:</strong> Each nonce can only be used once</li>
+                            <li><strong>Combined protection:</strong> Both checks must pass</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="attack-demo">
+                <div class="demo-columns">
+                    <!-- Vulnerable Mode -->
+                    <div class="demo-column vulnerable">
+                        <h3>
+                            <span class="column-icon">⚠️</span>
+                            Without Defense
+                        </h3>
+                        <button class="btn btn-danger btn-attack" data-attack="replay" data-mode="vulnerable">
+                            Run Attack (Vulnerable)
+                        </button>
+                        <div class="demo-status" id="replay-vulnerable-status">Ready</div>
+                        <div class="demo-log" id="replay-vulnerable-log">
+                            <div class="log-placeholder">Attack log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="replay-vulnerable-result"></div>
+                    </div>
+
+                    <!-- Defended Mode -->
+                    <div class="demo-column defended">
+                        <h3>
+                            <span class="column-icon">🛡️</span>
+                            With Defense
+                        </h3>
+                        <button class="btn btn-success btn-attack" data-attack="replay" data-mode="defended">
+                            Run Attack (Defended)
+                        </button>
+                        <div class="demo-status" id="replay-defended-status">Ready</div>
+                        <div class="demo-log" id="replay-defended-log">
+                            <div class="log-placeholder">Defense log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="replay-defended-result"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Ciphertext Tampering Panel -->
+        <section class="attack-panel" id="tampering-panel">
+            <div class="attack-info">
+                <h2>✏️ Ciphertext Tampering Attack</h2>
+                <div class="attack-description">
+                    <p>
+                        Ciphertext tampering involves modifying encrypted data in transit. 
+                        Without authenticated encryption, changes may go undetected and could 
+                        corrupt the decrypted message in unpredictable ways.
+                    </p>
+                    <div class="attack-details">
+                        <h4>How it works:</h4>
+                        <ol>
+                            <li>Attacker intercepts an encrypted message</li>
+                            <li>Attacker modifies bytes in the ciphertext</li>
+                            <li>Modified ciphertext is forwarded to recipient</li>
+                            <li>Without AEAD: Decryption may produce corrupted plaintext</li>
+                            <li>With AES-GCM: Authentication tag validation fails</li>
+                        </ol>
+                    </div>
+                    <div class="defense-info">
+                        <h4>Defense Mechanism:</h4>
+                        <ul>
+                            <li><strong>AES-GCM:</strong> Authenticated Encryption with Associated Data</li>
+                            <li><strong>128-bit auth tag:</strong> Cryptographic integrity check</li>
+                            <li><strong>Tamper detection:</strong> Any modification invalidates the tag</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="attack-demo">
+                <div class="demo-columns">
+                    <div class="demo-column vulnerable">
+                        <h3>
+                            <span class="column-icon">⚠️</span>
+                            Without AEAD (Simulated)
+                        </h3>
+                        <button class="btn btn-danger btn-attack" data-attack="tampering" data-mode="vulnerable">
+                            Run Attack (Vulnerable)
+                        </button>
+                        <div class="demo-status" id="tampering-vulnerable-status">Ready</div>
+                        <div class="demo-log" id="tampering-vulnerable-log">
+                            <div class="log-placeholder">Attack log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="tampering-vulnerable-result"></div>
+                    </div>
+
+                    <div class="demo-column defended">
+                        <h3>
+                            <span class="column-icon">🛡️</span>
+                            With AES-GCM
+                        </h3>
+                        <button class="btn btn-success btn-attack" data-attack="tampering" data-mode="defended">
+                            Run Attack (Defended)
+                        </button>
+                        <div class="demo-status" id="tampering-defended-status">Ready</div>
+                        <div class="demo-log" id="tampering-defended-log">
+                            <div class="log-placeholder">Defense log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="tampering-defended-result"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MITM Attack Panel -->
+        <section class="attack-panel" id="mitm-panel">
+            <div class="attack-info">
+                <h2>👤 Man-in-the-Middle Attack</h2>
+                <div class="attack-description">
+                    <p>
+                        In a MITM attack, an attacker positions themselves between two parties,
+                        intercepting and potentially modifying all communications. During key 
+                        exchange, they can substitute their own keys to decrypt all messages.
+                    </p>
+                    <div class="attack-details">
+                        <h4>How it works:</h4>
+                        <ol>
+                            <li>Alice requests Bob's public key from server</li>
+                            <li>Attacker intercepts and returns their own key</li>
+                            <li>Alice encrypts messages with attacker's key</li>
+                            <li>Attacker decrypts, reads, re-encrypts for Bob</li>
+                            <li>Both parties unaware of the interception</li>
+                        </ol>
+                    </div>
+                    <div class="defense-info">
+                        <h4>Defense Mechanism:</h4>
+                        <ul>
+                            <li><strong>RSA-PSS Signatures:</strong> Sign all key exchanges</li>
+                            <li><strong>Key fingerprints:</strong> Verify through secondary channel</li>
+                            <li><strong>Public key binding:</strong> Keys tied to verified identities</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="attack-demo">
+                <div class="demo-columns">
+                    <div class="demo-column vulnerable">
+                        <h3>
+                            <span class="column-icon">⚠️</span>
+                            Without Signatures
+                        </h3>
+                        <button class="btn btn-danger btn-attack" data-attack="mitm" data-mode="vulnerable">
+                            Run Attack (Vulnerable)
+                        </button>
+                        <div class="demo-status" id="mitm-vulnerable-status">Ready</div>
+                        <div class="demo-log" id="mitm-vulnerable-log">
+                            <div class="log-placeholder">Attack log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="mitm-vulnerable-result"></div>
+                    </div>
+
+                    <div class="demo-column defended">
+                        <h3>
+                            <span class="column-icon">🛡️</span>
+                            With RSA-PSS Signatures
+                        </h3>
+                        <button class="btn btn-success btn-attack" data-attack="mitm" data-mode="defended">
+                            Run Attack (Defended)
+                        </button>
+                        <div class="demo-status" id="mitm-defended-status">Ready</div>
+                        <div class="demo-log" id="mitm-defended-log">
+                            <div class="log-placeholder">Defense log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="mitm-defended-result"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- DoS Attack Panel -->
+        <section class="attack-panel" id="dos-panel">
+            <div class="attack-info">
+                <h2>💥 Denial of Service Attack</h2>
+                <div class="attack-description">
+                    <p>
+                        A DoS attack floods the server with requests, consuming resources and
+                        preventing legitimate users from accessing the service. Without rate
+                        limiting, even a single attacker can overwhelm the system.
+                    </p>
+                    <div class="attack-details">
+                        <h4>How it works:</h4>
+                        <ol>
+                            <li>Attacker sends many requests per second</li>
+                            <li>Server processes each request consuming CPU/memory</li>
+                            <li>Resources exhausted, legitimate requests timeout</li>
+                            <li>Service becomes unavailable to real users</li>
+                        </ol>
+                    </div>
+                    <div class="defense-info">
+                        <h4>Defense Mechanism:</h4>
+                        <ul>
+                            <li><strong>Token bucket algorithm:</strong> Limit requests per time window</li>
+                            <li><strong>Per-IP tracking:</strong> Separate limits for each client</li>
+                            <li><strong>Graduated limits:</strong> Different rates for different endpoints</li>
+                            <li><strong>HTTP 429:</strong> "Too Many Requests" response when limited</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="attack-demo">
+                <div class="demo-columns">
+                    <div class="demo-column vulnerable">
+                        <h3>
+                            <span class="column-icon">⚠️</span>
+                            Without Rate Limiting
+                        </h3>
+                        <button class="btn btn-danger btn-attack" data-attack="dos" data-mode="vulnerable">
+                            Run Attack (Vulnerable)
+                        </button>
+                        <div class="demo-status" id="dos-vulnerable-status">Ready</div>
+                        <div class="demo-log" id="dos-vulnerable-log">
+                            <div class="log-placeholder">Attack log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="dos-vulnerable-result"></div>
+                    </div>
+
+                    <div class="demo-column defended">
+                        <h3>
+                            <span class="column-icon">🛡️</span>
+                            With Rate Limiting
+                        </h3>
+                        <button class="btn btn-success btn-attack" data-attack="dos" data-mode="defended">
+                            Run Attack (Defended)
+                        </button>
+                        <div class="demo-status" id="dos-defended-status">Ready</div>
+                        <div class="demo-log" id="dos-defended-log">
+                            <div class="log-placeholder">Defense log will appear here...</div>
+                        </div>
+                        <div class="demo-result" id="dos-defended-result"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Summary Section -->
+    <section class="lab-summary">
+        <h2>📊 Attack Summary</h2>
+        <div class="summary-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Attack Type</th>
+                        <th>Threat</th>
+                        <th>Defense</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Replay Attack</td>
+                        <td>Duplicate transactions/actions</td>
+                        <td>Timestamp + Nonce validation</td>
+                        <td><span class="status-badge badge-success">Protected</span></td>
+                    </tr>
+                    <tr>
+                        <td>Ciphertext Tampering</td>
+                        <td>Message corruption/manipulation</td>
+                        <td>AES-256-GCM authentication tag</td>
+                        <td><span class="status-badge badge-success">Protected</span></td>
+                    </tr>
+                    <tr>
+                        <td>MITM Attack</td>
+                        <td>Message interception/modification</td>
+                        <td>RSA-PSS signatures + verification</td>
+                        <td><span class="status-badge badge-success">Protected</span></td>
+                    </tr>
+                    <tr>
+                        <td>DoS Attack</td>
+                        <td>Service unavailability</td>
+                        <td>Token bucket rate limiting</td>
+                        <td><span class="status-badge badge-success">Protected</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/attack_lab.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        AttackLab.init();
+    });
+</script>
+{% endblock %}

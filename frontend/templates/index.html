@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}SecureChat - Secure Messaging{% endblock %}
+
+{% block nav_items %}
+<a href="{{ url_for('attack_lab') }}" class="nav-link">Attack Lab</a>
+{% endblock %}
+
+{% block content %}
+<div class="landing-container">
+    <div class="hero-section">
+        <h1 class="hero-title">
+            <span class="hero-icon">🔐</span>
+            SecureChat
+        </h1>
+        <p class="hero-subtitle">End-to-end encrypted messaging with industry-standard cryptography</p>
+        
+        <div class="security-features">
+            <div class="feature">
+                <span class="feature-icon">🔒</span>
+                <span class="feature-text">AES-256-GCM Encryption</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">✍️</span>
+                <span class="feature-text">RSA-PSS Signatures</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🔑</span>
+                <span class="feature-text">RSA-OAEP Key Exchange</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="auth-container">
+        <div class="auth-card">
+            <h2 class="auth-title">Get Started</h2>
+            
+            <form id="auth-form" class="auth-form">
+                <div class="form-group">
+                    <label for="username" class="form-label">Username</label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        class="form-input" 
+                        placeholder="Enter your username"
+                        autocomplete="username"
+                        required
+                        minlength="3"
+                        maxlength="64"
+                    >
+                    <span class="form-hint">3-64 characters, alphanumeric and underscores</span>
+                </div>
+
+                <div class="form-error" id="form-error" style="display: none;"></div>
+                
+                <div class="auth-buttons">
+                    <button type="button" id="register-btn" class="btn btn-primary">
+                        <span class="btn-icon">📝</span>
+                        Register
+                    </button>
+                    <button type="button" id="login-btn" class="btn btn-secondary">
+                        <span class="btn-icon">🔓</span>
+                        Login
+                    </button>
+                </div>
+            </form>
+
+            <div class="auth-info">
+                <p><strong>New user?</strong> Click Register to create your encryption keys.</p>
+                <p><strong>Returning?</strong> Click Login to reconnect.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="attack-lab-promo">
+        <div class="promo-card">
+            <h3>🧪 Attack Lab</h3>
+            <p>Explore security vulnerabilities and defenses with our interactive demonstrations.</p>
+            <a href="{{ url_for('attack_lab') }}" class="btn btn-danger">
+                Enter Attack Lab
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Loading overlay -->
+<div id="loading-overlay" class="loading-overlay" style="display: none;">
+    <div class="loading-spinner"></div>
+    <p class="loading-text">Generating encryption keys...</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crypto.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+<script>
+    // Initialize login/register handlers
+    document.addEventListener('DOMContentLoaded', function() {
+        const usernameInput = document.getElementById('username');
+        const registerBtn = document.getElementById('register-btn');
+        const loginBtn = document.getElementById('login-btn');
+        const formError = document.getElementById('form-error');
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        function showError(message) {
+            formError.textContent = message;
+            formError.style.display = 'block';
+        }
+
+        function hideError() {
+            formError.style.display = 'none';
+        }
+
+        function showLoading(text) {
+            loadingOverlay.querySelector('.loading-text').textContent = text;
+            loadingOverlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function validateUsername(username) {
+            if (!username || username.length < 3) {
+                return 'Username must be at least 3 characters';
+            }
+            if (username.length > 64) {
+                return 'Username must be at most 64 characters';
+            }
+            if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+                return 'Username can only contain letters, numbers, and underscores';
+            }
+            return null;
+        }
+
+        registerBtn.addEventListener('click', async function() {
+            hideError();
+            const username = usernameInput.value.trim();
+            
+            const error = validateUsername(username);
+            if (error) {
+                showError(error);
+                return;
+            }
+
+            try {
+                showLoading('Generating encryption keys...');
+                
+                // Register with the server
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ user_id: username })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    hideLoading();
+                    showError(data.message || 'Registration failed');
+                    return;
+                }
+
+                // Store user info
+                localStorage.setItem('securechat_user_id', username);
+                localStorage.setItem('securechat_public_key', data.public_key);
+                localStorage.setItem('securechat_fingerprint', data.fingerprint);
+
+                // Generate client-side key pair for additional security
+                showLoading('Setting up secure connection...');
+                await SecureChatCrypto.generateAndStoreKeyPair(username);
+
+                hideLoading();
+                
+                // Redirect to chat
+                window.location.href = '/chat';
+            } catch (err) {
+                hideLoading();
+                showError('Connection error. Please try again.');
+                console.error('Registration error:', err);
+            }
+        });
+
+        loginBtn.addEventListener('click', async function() {
+            hideError();
+            const username = usernameInput.value.trim();
+            
+            const error = validateUsername(username);
+            if (error) {
+                showError(error);
+                return;
+            }
+
+            try {
+                showLoading('Verifying credentials...');
+                
+                // Check if user exists
+                const response = await fetch(`/api/keys/public/${encodeURIComponent(username)}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    hideLoading();
+                    showError(data.message || 'User not found. Please register first.');
+                    return;
+                }
+
+                // Store user info
+                localStorage.setItem('securechat_user_id', username);
+                localStorage.setItem('securechat_public_key', data.public_key);
+                localStorage.setItem('securechat_fingerprint', data.fingerprint);
+
+                // Check if we have local keys, if not regenerate
+                const hasLocalKeys = await SecureChatCrypto.hasStoredKeyPair(username);
+                if (!hasLocalKeys) {
+                    showLoading('Restoring encryption keys...');
+                    await SecureChatCrypto.generateAndStoreKeyPair(username);
+                }
+
+                hideLoading();
+                
+                // Redirect to chat
+                window.location.href = '/chat';
+            } catch (err) {
+                hideLoading();
+                showError('Connection error. Please try again.');
+                console.error('Login error:', err);
+            }
+        });
+
+        // Handle Enter key
+        usernameInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loginBtn.click();
+            }
+        });
+    });
+</script>
+{% endblock %}
