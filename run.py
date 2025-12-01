@@ -92,39 +92,37 @@ Examples:
 def print_banner(host: str, port: int, debug: bool):
     """Print startup banner."""
     banner = """
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║   ███████╗███████╗ ██████╗██╗   ██╗██████╗ ███████╗           ║
-║   ██╔════╝██╔════╝██╔════╝██║   ██║██╔══██╗██╔════╝           ║
-║   ███████╗█████╗  ██║     ██║   ██║██████╔╝█████╗             ║
-║   ╚════██║██╔══╝  ██║     ██║   ██║██╔══██╗██╔══╝             ║
-║   ███████║███████╗╚██████╗╚██████╔╝██║  ██║███████╗           ║
-║   ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝           ║
-║                                                               ║
-║    ██████╗██╗  ██╗ █████╗ ████████╗                           ║
-║   ██╔════╝██║  ██║██╔══██╗╚══██╔══╝                           ║
-║   ██║     ███████║███████║   ██║                              ║
-║   ██║     ██╔══██║██╔══██║   ██║                              ║
-║   ╚██████╗██║  ██║██║  ██║   ██║                              ║
-║    ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝                              ║
-║                                                               ║
-║           End-to-End Encrypted Messaging                      ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
++===============================================================+
+|                                                               |
+|   ____  _____ ____ _   _ ____  _____                          |
+|  / ___|| ____/ ___| | | |  _ \| ____|                         |
+|  \___ \|  _|| |   | | | | |_) |  _|                           |
+|   ___) | |__| |___| |_| |  _ <| |___                          |
+|  |____/|_____\____|\___/|_| \_\_____|                         |
+|                                                               |
+|    ____ _   _    _  _____                                     |
+|   / ___| | | |  / \|_   _|                                    |
+|  | |   | |_| | / _ \ | |                                      |
+|  | |___|  _  |/ ___ \| |                                      |
+|   \____|_| |_/_/   \_\_|                                      |
+|                                                               |
+|           End-to-End Encrypted Messaging                      |
+|                                                               |
++===============================================================+
 """
     print(banner)
-    print(f"  🔒 SecureChat Server Starting...")
-    print(f"  📍 Address: http://{host}:{port}")
-    print(f"  🔧 Debug Mode: {'ON' if debug else 'OFF'}")
-    print(f"  🌐 API Endpoint: http://{host}:{port}/api")
-    print(f"  📡 WebSocket: ws://{host}:{port}")
+    print(f"  [*] SecureChat Server Starting...")
+    print(f"  [*] Address: http://{host}:{port}")
+    print(f"  [*] Debug Mode: {'ON' if debug else 'OFF'}")
+    print(f"  [*] API Endpoint: http://{host}:{port}/api")
+    print(f"  [*] WebSocket: ws://{host}:{port}")
     print()
     print("  Security Features:")
-    print("    • AES-256-GCM message encryption")
-    print("    • RSA-2048 key exchange (OAEP)")
-    print("    • RSA-PSS digital signatures")
-    print("    • Replay attack protection")
-    print("    • Rate limiting (DoS protection)")
+    print("    - AES-256-GCM message encryption")
+    print("    - RSA-2048 key exchange (OAEP)")
+    print("    - RSA-PSS digital signatures")
+    print("    - Replay attack protection")
+    print("    - Rate limiting (DoS protection)")
     print()
     print("  Press Ctrl+C to stop the server")
     print("=" * 65)
@@ -165,12 +163,12 @@ def main():
     except KeyboardInterrupt:
         print("\n")
         logger.info("Server stopped by user")
-        print("👋 Goodbye!")
+        print("Goodbye!")
         sys.exit(0)
         
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
-        print(f"\n❌ Error: {e}")
+        print(f"\nError: {e}")
         sys.exit(1)
 
 
