@@ -1,0 +1,49 @@
+# Ensure consistent line endings across platforms
+* text=auto eol=lf
+
+# Handle text files
+*.txt text eol=lf
+*.md text eol=lf
+*.rst text eol=lf
+
+# Handle Python files
+*.py text eol=lf
+
+# Handle HTML files
+*.html text eol=crlf
+
+# Handle CSS and JavaScript files
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+
+# Handle configuration files
+*.cfg text eol=lf
+*.ini text eol=lf
+*.toml text eol=lf
+
+# Handle YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Handle shell scripts
+*.sh text eol=lf
+
+# Handle Windows batch files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.so binary
+*.dll binary
+*.dylib binary
+
+# Don't normalize line endings for these files
+*.pem -text
+*.key -text

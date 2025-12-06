@@ -6,11 +6,14 @@ This module defines the REST API endpoints for SecureChat:
 - GET /api/users - List registered users
 - POST /api/keys/exchange - Exchange session keys
 - GET /api/keys/public/<user_id> - Get user's public key
+- POST /api/keys/rotate-session - Rotate session key with expiration
+- POST /api/keys/revoke/<user_id> - Revoke user's keys
 
 Frontend routes:
 - GET / - Landing/login page
 - GET /chat - Chat interface
 - GET /attack-lab - Attack Lab interface
+- GET /key-management - Key Management dashboard
 """
 
 from flask import Blueprint, request, jsonify, render_template
@@ -150,7 +153,8 @@ def list_users():
                 {
                     "user_id": "string",
                     "fingerprint": "hex-encoded key fingerprint",
-                    "created_at": timestamp
+                    "created_at": timestamp,
+                    "revoked": boolean
                 }
             ]
         }
@@ -374,6 +378,127 @@ def revoke_session(session_id: str):
         }), 404
 
 
+# Rotate session key endpoint
+@api_bp.route('/keys/rotate-session', methods=['POST'])
+@rate_limit('api_general')
+@validate_json('user_id', 'session_id')
+def rotate_session_key():
+    """
+    Rotate the session key for a specific session.
+    
+    Request body:
+        {
+            "user_id": "string",
+            "session_id": "string",
+            "expiration_minutes": number (optional)
+        }
+    
+    Response:
+        {
+            "message": "Session key rotated",
+            "user_id": "string",
+            "session_id": "string",
+            "new_expires_at": timestamp
+        }
+    """
+    data = request.get_json()
+    user_id = data['user_id']
+    session_id = data['session_id']
+    expiration_minutes = data.get('expiration_minutes', 60)  # Default 1 hour
+    
+    # Validate input
+    if not user_id or not isinstance(user_id, str):
+        return jsonify({
+            'error': 'Bad Request',
+            'message': 'user_id must be a non-empty string'
+        }), 400
+    
+    if not session_id or not isinstance(session_id, str):
+        return jsonify({
+            'error': 'Bad Request',
+            'message': 'session_id must be a non-empty string'
+        }), 400
+    
+    if not isinstance(expiration_minutes, (int, float)) or expiration_minutes <= 0:
+        return jsonify({
+            'error': 'Bad Request',
+            'message': 'expiration_minutes must be a positive number'
+        }), 400
+    
+    km = get_key_manager()
+    
+    try:
+        # Verify user is part of the session
+        session = km.get_session(session_id)
+        if not session:
+            return jsonify({
+                'error': 'Not Found',
+                'message': 'Session not found'
+            }), 404
+        
+        if user_id not in (session.user1_id, session.user2_id):
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to rotate this session key'
+            }), 403
+        
+        # Rotate the session key
+        km._rotate_session_key(session_id)
+        
+        # Get updated session info
+        session = km.get_session(session_id)
+        if not session:
+            return jsonify({
+                'error': 'Not Found',
+                'message': 'Session not found after rotation'
+            }), 404
+        
+        return jsonify({
+            'message': 'Session key rotated',
+            'user_id': user_id,
+            'session_id': session_id,
+            'new_expires_at': session.expires_at
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'error': 'Internal Server Error',
+            'message': str(e)
+        }), 500
+
+
+# Revoke user keys endpoint
+@api_bp.route('/keys/revoke/<user_id>', methods=['POST'])
+@rate_limit('api_general')
+def revoke_user_keys(user_id: str):
+    """
+    Revoke keys for a user.
+    
+    This adds the user's public key fingerprint to the revoked keys list.
+    
+    Path parameters:
+        user_id: The user's ID to revoke
+    
+    Response:
+        {
+            "message": "Keys revoked",
+            "user_id": "string"
+        }
+    """
+    km = get_key_manager()
+    
+    try:
+        km.revoke_user_keys(user_id)
+        return jsonify({
+            'message': 'Keys revoked',
+            'user_id': user_id
+        }), 200
+    except ValueError as e:
+        return jsonify({
+            'error': 'Not Found',
+            'message': str(e)
+        }), 404
+
+
 # Error handlers for the blueprint
 @api_bp.errorhandler(400)
 def bad_request(error):
@@ -397,3 +522,78 @@ def internal_error(error):
         'error': 'Internal Server Error',
         'message': 'An unexpected error occurred'
     }), 500
+
+
+# Attack Lab endpoints
+@api_bp.route('/api/lab/status', methods=['GET'])
+@rate_limit('api_general')
+def lab_status():
+    """Get attack lab status."""
+    return jsonify({
+        'status': 'active',
+        'attacks_available': ['replay', 'tampering', 'mitm', 'dos']
+    })
+
+
+@api_bp.route('/api/lab/replay/vulnerable', methods=['POST'])
+@rate_limit('api_general')
+def replay_vulnerable():
+    """Demo replay attack without defense."""
+    from backend.services.attack_lab import simulate_replay_attack
+    return jsonify(simulate_replay_attack('vulnerable'))
+
+
+@api_bp.route('/api/lab/replay/defended', methods=['POST'])
+@rate_limit('api_general')
+def replay_defended():
+    """Demo replay attack with defense."""
+    from backend.services.attack_lab import simulate_replay_attack
+    return jsonify(simulate_replay_attack('defended'))
+
+
+@api_bp.route('/api/lab/tampering/vulnerable', methods=['POST'])
+@rate_limit('api_general')
+def tampering_vulnerable():
+    """Demo ciphertext tampering without defense."""
+    from backend.services.attack_lab import simulate_tampering_attack
+    return jsonify(simulate_tampering_attack('vulnerable'))
+
+
+@api_bp.route('/api/lab/tampering/defended', methods=['POST'])
+@rate_limit('api_general')
+def tampering_defended():
+    """Demo ciphertext tampering with defense."""
+    from backend.services.attack_lab import simulate_tampering_attack
+    return jsonify(simulate_tampering_attack('defended'))
+
+
+@api_bp.route('/api/lab/mitm/vulnerable', methods=['POST'])
+@rate_limit('api_general')
+def mitm_vulnerable():
+    """Demo MITM attack without defense."""
+    from backend.services.attack_lab import simulate_mitm_attack
+    return jsonify(simulate_mitm_attack('vulnerable'))
+
+
+@api_bp.route('/api/lab/mitm/defended', methods=['POST'])
+@rate_limit('api_general')
+def mitm_defended():
+    """Demo MITM attack with defense."""
+    from backend.services.attack_lab import simulate_mitm_attack
+    return jsonify(simulate_mitm_attack('defended'))
+
+
+@api_bp.route('/api/lab/dos/vulnerable', methods=['POST'])
+@rate_limit('api_general')
+def dos_vulnerable():
+    """Demo DoS attack without defense."""
+    from backend.services.attack_lab import simulate_dos_attack
+    return jsonify(simulate_dos_attack('vulnerable'))
+
+
+@api_bp.route('/api/lab/dos/defended', methods=['POST'])
+@rate_limit('api_general')
+def dos_defended():
+    """Demo DoS attack with defense."""
+    from backend.services.attack_lab import simulate_dos_attack
+    return jsonify(simulate_dos_attack('defended'))

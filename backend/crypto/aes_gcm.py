@@ -9,7 +9,8 @@ AES-GCM provides both confidentiality and integrity, using a 256-bit key,
 """
 
 import os
-from typing import Tuple
+import struct
+from typing import Tuple, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
@@ -36,13 +37,14 @@ def generate_key() -> bytes:
     return os.urandom(KEY_SIZE)
 
 
-def encrypt(plaintext: bytes, key: bytes) -> Tuple[bytes, bytes, bytes]:
+def encrypt(plaintext: bytes, key: bytes, associated_data: Optional[bytes] = None) -> Tuple[bytes, bytes, bytes]:
     """
     Encrypt plaintext using AES-256-GCM.
     
     Args:
         plaintext: The data to encrypt.
         key: A 256-bit (32-byte) AES key.
+        associated_data: Optional associated data for authentication (not encrypted).
     
     Returns:
         tuple: A tuple containing (ciphertext, iv, tag):
@@ -71,7 +73,7 @@ def encrypt(plaintext: bytes, key: bytes) -> Tuple[bytes, bytes, bytes]:
     aesgcm = AESGCM(key)
     
     # encrypt() returns ciphertext with tag appended
-    ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, None)
+    ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, associated_data)
     
     # Separate ciphertext and tag
     ciphertext = ciphertext_with_tag[:-TAG_SIZE]
@@ -80,7 +82,7 @@ def encrypt(plaintext: bytes, key: bytes) -> Tuple[bytes, bytes, bytes]:
     return ciphertext, iv, tag
 
 
-def decrypt(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes) -> bytes:
+def decrypt(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes, associated_data: Optional[bytes] = None) -> bytes:
     """
     Decrypt ciphertext using AES-256-GCM.
     
@@ -89,6 +91,7 @@ def decrypt(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes) -> bytes:
         key: A 256-bit (32-byte) AES key.
         iv: The 12-byte initialization vector used during encryption.
         tag: The 16-byte authentication tag from encryption.
+        associated_data: Optional associated data that was authenticated.
     
     Returns:
         bytes: The decrypted plaintext.
@@ -118,7 +121,72 @@ def decrypt(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes) -> bytes:
     ciphertext_with_tag = ciphertext + tag
     
     # Decrypt and verify (raises InvalidTag if verification fails)
-    plaintext = aesgcm.decrypt(iv, ciphertext_with_tag, None)
+    plaintext = aesgcm.decrypt(iv, ciphertext_with_tag, associated_data)
+    
+    return plaintext
+
+
+def encrypt_with_nonce(plaintext: bytes, key: bytes, nonce: bytes, associated_data: Optional[bytes] = None) -> Tuple[bytes, bytes]:
+    """
+    Encrypt plaintext using AES-256-GCM with a specific nonce.
+    
+    This is useful for deterministic encryption or when nonces are managed externally.
+    
+    Args:
+        plaintext: The data to encrypt.
+        key: A 256-bit (32-byte) AES key.
+        nonce: A 12-byte nonce (must be unique per key).
+        associated_data: Optional associated data for authentication.
+    
+    Returns:
+        tuple: A tuple containing (ciphertext, tag).
+    
+    Raises:
+        ValueError: If key or nonce have incorrect sizes.
+    """
+    if len(key) != KEY_SIZE:
+        raise ValueError(f"Key must be {KEY_SIZE} bytes (256 bits)")
+    if len(nonce) != IV_SIZE:
+        raise ValueError(f"Nonce must be {IV_SIZE} bytes (96 bits)")
+    
+    aesgcm = AESGCM(key)
+    ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext, associated_data)
+    
+    ciphertext = ciphertext_with_tag[:-TAG_SIZE]
+    tag = ciphertext_with_tag[-TAG_SIZE:]
+    
+    return ciphertext, tag
+
+
+def decrypt_with_nonce(ciphertext: bytes, key: bytes, nonce: bytes, tag: bytes, associated_data: Optional[bytes] = None) -> bytes:
+    """
+    Decrypt ciphertext using AES-256-GCM with a specific nonce.
+    
+    Args:
+        ciphertext: The encrypted data.
+        key: A 256-bit (32-byte) AES key.
+        nonce: The 12-byte nonce used during encryption.
+        tag: The 16-byte authentication tag.
+        associated_data: Optional associated data that was authenticated.
+    
+    Returns:
+        bytes: The decrypted plaintext.
+    
+    Raises:
+        ValueError: If key, nonce, or tag have incorrect sizes.
+        InvalidTag: If authentication fails.
+    """
+    if len(key) != KEY_SIZE:
+        raise ValueError(f"Key must be {KEY_SIZE} bytes (256 bits)")
+    if len(nonce) != IV_SIZE:
+        raise ValueError(f"Nonce must be {IV_SIZE} bytes (96 bits)")
+    if len(tag) != TAG_SIZE:
+        raise ValueError(f"Tag must be {TAG_SIZE} bytes (128 bits)")
+    
+    aesgcm = AESGCM(key)
+    ciphertext_with_tag = ciphertext + tag
+    
+    plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, associated_data)
     
     return plaintext
 
@@ -175,6 +243,29 @@ if __name__ == "__main__":
     decrypted_empty = decrypt(ct_empty, test_key, iv_empty, tag_empty)
     assert decrypted_empty == b"", "Empty plaintext handling failed!"
     print("   ✓ Empty plaintext handled correctly!")
+    
+    # Test 6: Associated data
+    print("\n6. Testing associated data:")
+    associated = b"authenticated but not encrypted"
+    ct_assoc, iv_assoc, tag_assoc = encrypt(test_plaintext, test_key, associated)
+    decrypted_assoc = decrypt(ct_assoc, test_key, iv_assoc, tag_assoc, associated)
+    assert decrypted_assoc == test_plaintext, "Decryption with associated data failed!"
+    
+    # Test tampering of associated data
+    try:
+        wrong_associated = b"wrong associated data"
+        decrypt(ct_assoc, test_key, iv_assoc, tag_assoc, wrong_associated)
+        print("   ✗ Should have detected wrong associated data")
+    except InvalidTag:
+        print("   ✓ Correctly detected tampered associated data!")
+    
+    # Test 7: Nonce-based encryption
+    print("\n7. Testing nonce-based encryption:")
+    test_nonce = os.urandom(IV_SIZE)
+    ct_nonce, tag_nonce = encrypt_with_nonce(test_plaintext, test_key, test_nonce)
+    decrypted_nonce = decrypt_with_nonce(ct_nonce, test_key, test_nonce, tag_nonce)
+    assert decrypted_nonce == test_plaintext, "Nonce-based decryption failed!"
+    print("   ✓ Nonce-based encryption works!")
     
     print("\n" + "="*50)
     print("All AES-256-GCM tests passed! ✓")

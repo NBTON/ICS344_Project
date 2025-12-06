@@ -11,10 +11,10 @@ RSA-OAEP (Optimal Asymmetric Encryption Padding) uses:
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from cryptography.exceptions import InvalidKey
+from cryptography.exceptions import InvalidKey, UnsupportedAlgorithm
 
 
-def encrypt_key(session_key: bytes, public_key: rsa.RSAPublicKey) -> bytes:
+def encrypt_key(session_key: bytes, public_key: rsa.RSAPublicKey, label: bytes = None) -> bytes:
     """
     Encrypt a session key using RSA-OAEP.
     
@@ -24,6 +24,7 @@ def encrypt_key(session_key: bytes, public_key: rsa.RSAPublicKey) -> bytes:
     Args:
         session_key: The symmetric key to encrypt (typically 32 bytes for AES-256).
         public_key: The recipient's RSA public key.
+        label: Optional label for OAEP padding (default: None).
     
     Returns:
         bytes: The encrypted session key.
@@ -40,9 +41,16 @@ def encrypt_key(session_key: bytes, public_key: rsa.RSAPublicKey) -> bytes:
         >>> len(encrypted_key)
         256  # RSA-2048 produces 256-byte ciphertext
     """
-    # Maximum plaintext size for RSA-OAEP with SHA-256:
-    # key_size_bytes - 2 * hash_size - 2 = 256 - 2*32 - 2 = 190 bytes
-    # This is plenty for a 32-byte AES key
+    # Calculate maximum plaintext size for RSA-OAEP with SHA-256
+    key_size_bytes = public_key.key_size // 8
+    hash_size = 32  # SHA-256
+    max_plaintext_size = key_size_bytes - 2 * hash_size - 2
+    
+    if len(session_key) > max_plaintext_size:
+        raise ValueError(
+            f"Session key too large ({len(session_key)} bytes). "
+            f"Maximum size for {public_key.key_size}-bit RSA is {max_plaintext_size} bytes."
+        )
     
     try:
         encrypted = public_key.encrypt(
@@ -50,7 +58,7 @@ def encrypt_key(session_key: bytes, public_key: rsa.RSAPublicKey) -> bytes:
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
                 algorithm=hashes.SHA256(),
-                label=None
+                label=label
             )
         )
         return encrypted
@@ -58,7 +66,7 @@ def encrypt_key(session_key: bytes, public_key: rsa.RSAPublicKey) -> bytes:
         raise ValueError(f"Failed to encrypt session key: {e}")
 
 
-def decrypt_key(encrypted_key: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
+def decrypt_key(encrypted_key: bytes, private_key: rsa.RSAPrivateKey, label: bytes = None) -> bytes:
     """
     Decrypt a session key using RSA-OAEP.
     
@@ -68,6 +76,7 @@ def decrypt_key(encrypted_key: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
     Args:
         encrypted_key: The encrypted session key.
         private_key: The recipient's RSA private key.
+        label: Optional label for OAEP padding (must match encryption).
     
     Returns:
         bytes: The decrypted session key.
@@ -91,14 +100,65 @@ def decrypt_key(encrypted_key: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
                 algorithm=hashes.SHA256(),
-                label=None
+                label=label
             )
         )
         return decrypted
     except InvalidKey as e:
         raise ValueError(f"Invalid key for decryption: {e}")
+    except UnsupportedAlgorithm as e:
+        raise ValueError(f"Unsupported algorithm: {e}")
     except Exception as e:
         raise ValueError(f"Failed to decrypt session key: {e}")
+
+
+def get_max_session_key_size(public_key: rsa.RSAPublicKey) -> int:
+    """
+    Get the maximum size for a session key that can be encrypted with this public key.
+    
+    Args:
+        public_key: The RSA public key.
+    
+    Returns:
+        int: Maximum session key size in bytes.
+    """
+    key_size_bytes = public_key.key_size // 8
+    hash_size = 32  # SHA-256
+    return key_size_bytes - 2 * hash_size - 2
+
+
+def encrypt_key_with_fingerprint(session_key: bytes, public_key: rsa.RSAPublicKey,
+                                fingerprint: bytes = None) -> bytes:
+    """
+    Encrypt a session key using RSA-OAEP with optional fingerprint as label.
+    
+    This provides additional security by binding the encryption to a specific key.
+    
+    Args:
+        session_key: The symmetric key to encrypt.
+        public_key: The recipient's RSA public key.
+        fingerprint: Optional fingerprint to use as OAEP label.
+    
+    Returns:
+        bytes: The encrypted session key.
+    """
+    return encrypt_key(session_key, public_key, label=fingerprint)
+
+
+def decrypt_key_with_fingerprint(encrypted_key: bytes, private_key: rsa.RSAPrivateKey,
+                                fingerprint: bytes = None) -> bytes:
+    """
+    Decrypt a session key using RSA-OAEP with optional fingerprint as label.
+    
+    Args:
+        encrypted_key: The encrypted session key.
+        private_key: The recipient's RSA private key.
+        fingerprint: Optional fingerprint that was used as OAEP label.
+    
+    Returns:
+        bytes: The decrypted session key.
+    """
+    return decrypt_key(encrypted_key, private_key, label=fingerprint)
 
 
 # Simple test when run directly
@@ -170,9 +230,9 @@ if __name__ == "__main__":
     print("   Ciphertext 2: " + enc2.hex()[:32] + "...")
     print("   ✓ Encryption is randomized (IND-CPA secure)!")
     
-    # Test 7: Large data rejection
+    # Test 7: Maximum plaintext size
     print("\n7. Testing maximum plaintext size:")
-    max_size = (2048 // 8) - 2 * 32 - 2  # 190 bytes for RSA-2048 with SHA-256
+    max_size = get_max_session_key_size(public_key)
     large_data = os.urandom(max_size)
     enc = encrypt_key(large_data, public_key)
     dec = decrypt_key(enc, private_key)
@@ -186,6 +246,20 @@ if __name__ == "__main__":
         print("   ✗ Should have raised ValueError for too large data")
     except ValueError:
         print(f"   ✓ Correctly rejected data larger than {max_size} bytes!")
+    
+    # Test 8: Label functionality
+    print("\n8. Testing OAEP label functionality:")
+    label = b"SecureChat Session Key"
+    encrypted_with_label = encrypt_key(session_key, public_key, label)
+    decrypted_with_label = decrypt_key(encrypted_with_label, private_key, label)
+    assert decrypted_with_label == session_key
+    
+    # Wrong label should fail
+    try:
+        decrypt_key(encrypted_with_label, private_key, b"Wrong Label")
+        print("   ✗ Should have failed with wrong label")
+    except ValueError:
+        print("   ✓ Correctly rejected wrong label!")
     
     print("\n" + "="*50)
     print("All RSA-OAEP tests passed! ✓")

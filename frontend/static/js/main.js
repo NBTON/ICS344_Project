@@ -182,6 +182,11 @@ const SocketManager = {
             SecureChatState.socket.emit(event, data);
         } else {
             console.warn('[Socket] Cannot emit, not connected');
+            // Trigger a custom event for the UI to handle
+            this._triggerEvent('connectionError', {
+                type: 'not_connected',
+                message: 'Socket is not connected'
+            });
         }
     },
 
@@ -214,10 +219,18 @@ const SocketManager = {
      * Ping server for latency check
      */
     ping() {
-        this._lastPing = Date.now();
-        if (SecureChatState.socket) {
+        if (SecureChatState.socket && SecureChatState.connected) {
+            this._lastPing = Date.now();
             SecureChatState.socket.emit('ping');
         }
+    },
+
+    /**
+     * Check if socket is connected
+     * @returns {boolean} Connection status
+     */
+    isConnected() {
+        return SecureChatState.connected && SecureChatState.socket && SecureChatState.socket.connected;
     },
 
     /**

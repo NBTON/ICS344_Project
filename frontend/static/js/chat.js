@@ -33,8 +33,12 @@ const SecureChatApp = {
         // Update UI with user info
         this._updateUserInfo();
 
-        // Initialize socket connection
+        // Initialize socket connection with reconnection logic, message queuing, and status indicators
         SocketManager.init(userId);
+        SocketManager.startHeartbeat();
+        SocketManager.setupReconnection();
+        SocketManager.initializeMessageQueue();
+        this._setupWebSocketStatusIndicators();
 
         // Set up event listeners
         this._setupEventListeners();
@@ -121,6 +125,46 @@ const SecureChatApp = {
         document.addEventListener('securechat:registered', (e) => {
             console.log('[Chat] Socket registered');
             this._updateConnectionStatus('connected');
+            SocketManager.clearReconnectTimeout();
+            SocketManager.sendQueuedMessages();
+        });
+
+        // Connection error
+        document.addEventListener('securechat:connectionError', (e) => {
+            const { type, message } = e.detail;
+            this._updateConnectionStatus('error');
+            this._updateQueuedMessagesCount(SocketManager.getQueueSize());
+            SocketManager.handleConnectionError(type, message);
+        });
+
+        // Connection closed
+        document.addEventListener('securechat:disconnected', (e) => {
+            console.log('[Chat] Socket disconnected');
+            this._updateConnectionStatus('disconnected');
+            this._updateQueuedMessagesCount(SocketManager.getQueueSize());
+            SocketManager.handleDisconnection();
+        });
+
+        // Heartbeat response
+        document.addEventListener('securechat:pong', (e) => {
+            SocketManager.updateHeartbeat();
+        });
+
+        // Message received
+        document.addEventListener('securechat:messageReceived', (e) => {
+            this._handleIncomingMessage(e.detail);
+        });
+
+        // Message sent confirmation
+        document.addEventListener('securechat:messageSent', (e) => {
+            console.log('[Chat] Message sent confirmed');
+            this._updateQueuedMessagesCount(SocketManager.getQueueSize());
+        });
+
+        // Decryption error
+        document.addEventListener('securechat:decryptionError', (e) => {
+            const { message } = e.detail;
+            Utils.showNotification(`Decryption failed: ${message}`, 'error');
         });
 
         // User online
@@ -164,6 +208,13 @@ const SecureChatApp = {
         document.addEventListener('securechat:socketError', (e) => {
             const { type, message } = e.detail;
             Utils.showNotification(message, 'error');
+        });
+
+        // Connection error
+        document.addEventListener('securechat:connectionError', (e) => {
+            const { type, message } = e.detail;
+            Utils.showNotification('Connection lost. Please refresh the page.', 'error');
+            this._updateConnectionStatus('error');
         });
     },
 
@@ -480,6 +531,12 @@ const SecureChatApp = {
             return;
         }
 
+        // Check socket connection before sending
+        if (!SocketManager.isConnected()) {
+            Utils.showNotification('Not connected to server. Please wait...', 'error');
+            return;
+        }
+
         try {
             // Get or generate session key
             let sessionKey = SecureChatCrypto.getSessionKey(this.currentSessionId);
@@ -542,9 +599,10 @@ const SecureChatApp = {
 
         console.log('[Chat] Incoming message from:', sender_id);
 
-        if (sender_id === this.currentUserId) {
-            return; // Ignore own messages
-        }
+        // Don't ignore own messages - we want to see what we sent
+        // if (sender_id === this.currentUserId) {
+        //     return; // Ignore own messages
+        // }
 
         try {
             // Get session key
@@ -571,13 +629,17 @@ const SecureChatApp = {
                 signatureValid: decrypted.signatureValid
             };
 
-            // Display if in current chat
+            // Always store the message
+            this._storeMessage(session_id, receivedMessage);
+
+            // Display message if it's in the current chat session
             if (session_id === this.currentSessionId) {
                 this._displayMessage(receivedMessage);
+            } else {
+                // If not current session, show a notification
+                console.log(`[Chat] New message from ${sender_id} in session ${session_id}`);
+                Utils.showNotification(`New message from ${sender_id}`, 'info');
             }
-
-            // Store message
-            this._storeMessage(session_id, receivedMessage);
 
             // Update last verified time
             this._updateLastVerified();

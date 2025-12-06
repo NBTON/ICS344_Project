@@ -12,10 +12,10 @@ RSA-PSS (Probabilistic Signature Scheme) uses:
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 
 
-def sign(message: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
+def sign(message: bytes, private_key: rsa.RSAPrivateKey, salt_length: int = None) -> bytes:
     """
     Sign a message using RSA-PSS with SHA-256.
     
@@ -25,6 +25,7 @@ def sign(message: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
     Args:
         message: The message to sign.
         private_key: The signer's RSA private key.
+        salt_length: Salt length for PSS padding. If None, uses MAX_LENGTH.
     
     Returns:
         bytes: The digital signature (256 bytes for RSA-2048).
@@ -37,18 +38,24 @@ def sign(message: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
         >>> len(signature)
         256  # RSA-2048 produces 256-byte signatures
     """
-    signature = private_key.sign(
-        message,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH
-        ),
-        hashes.SHA256()
-    )
-    return signature
+    if salt_length is None:
+        salt_length = padding.PSS.MAX_LENGTH
+    
+    try:
+        signature = private_key.sign(
+            message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=salt_length
+            ),
+            hashes.SHA256()
+        )
+        return signature
+    except Exception as e:
+        raise ValueError(f"Failed to sign message: {e}")
 
 
-def verify(message: bytes, signature: bytes, public_key: rsa.RSAPublicKey) -> bool:
+def verify(message: bytes, signature: bytes, public_key: rsa.RSAPublicKey, salt_length: int = None) -> bool:
     """
     Verify an RSA-PSS signature.
     
@@ -59,6 +66,7 @@ def verify(message: bytes, signature: bytes, public_key: rsa.RSAPublicKey) -> bo
         message: The original message that was signed.
         signature: The signature to verify.
         public_key: The signer's RSA public key.
+        salt_length: Salt length that was used for signing. If None, tries MAX_LENGTH.
     
     Returns:
         bool: True if the signature is valid, False otherwise.
@@ -73,18 +81,29 @@ def verify(message: bytes, signature: bytes, public_key: rsa.RSAPublicKey) -> bo
         >>> verify(b"Modified message", signature, public_key)
         False
     """
+    if salt_length is None:
+        salt_length = padding.PSS.MAX_LENGTH
+    
     try:
         public_key.verify(
             signature,
             message,
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
+                salt_length=salt_length
             ),
             hashes.SHA256()
         )
         return True
     except InvalidSignature:
+        return False
+    except (ValueError, UnsupportedAlgorithm):
+        # Try with MAX_LENGTH if salt_length was specified
+        if salt_length != padding.PSS.MAX_LENGTH:
+            try:
+                return verify(message, signature, public_key, padding.PSS.MAX_LENGTH)
+            except:
+                return False
         return False
 
 
@@ -147,10 +166,89 @@ def verify_message_signature(
     return verify(data_to_verify, signature, public_key)
 
 
+def create_message_digest(message: bytes) -> bytes:
+    """
+    Create a SHA-256 digest of a message.
+    
+    This can be used for pre-hashed signing scenarios.
+    
+    Args:
+        message: The message to hash.
+    
+    Returns:
+        bytes: The SHA-256 digest.
+    """
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(message)
+    return digest.finalize()
+
+
+def sign_prehashed(digest: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
+    """
+    Sign a pre-computed hash using RSA-PSS.
+    
+    Args:
+        digest: The pre-computed SHA-256 digest.
+        private_key: The signer's RSA private key.
+    
+    Returns:
+        bytes: The digital signature.
+    """
+    if len(digest) != 32:  # SHA-256 is 32 bytes
+        raise ValueError("Digest must be a SHA-256 hash (32 bytes)")
+    
+    try:
+        signature = private_key.sign(
+            digest,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            utils.Prehashed(hashes.SHA256())
+        )
+        return signature
+    except Exception as e:
+        raise ValueError(f"Failed to sign digest: {e}")
+
+
+def verify_prehashed(digest: bytes, signature: bytes, public_key: rsa.RSAPublicKey) -> bool:
+    """
+    Verify a signature for a pre-computed hash.
+    
+    Args:
+        digest: The pre-computed SHA-256 digest.
+        signature: The signature to verify.
+        public_key: The signer's RSA public key.
+    
+    Returns:
+        bool: True if the signature is valid, False otherwise.
+    """
+    if len(digest) != 32:  # SHA-256 is 32 bytes
+        return False
+    
+    try:
+        public_key.verify(
+            signature,
+            digest,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            utils.Prehashed(hashes.SHA256())
+        )
+        return True
+    except InvalidSignature:
+        return False
+    except Exception:
+        return False
+
+
 # Simple test when run directly
 if __name__ == "__main__":
     import os
     import time
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import utils
     from backend.crypto.rsa_keys import generate_key_pair
     
     print("Testing RSA-PSS implementation...")
@@ -260,6 +358,18 @@ if __name__ == "__main__":
     assert not is_nonce_tampered, "Should detect nonce tampering!"
     
     print("   ✓ All message tampering correctly detected!")
+    
+    # Test 10: Pre-hashed signing
+    print("\n10. Testing pre-hashed signing:")
+    digest = create_message_digest(message)
+    prehashed_sig = sign_prehashed(digest, private_key)
+    assert verify_prehashed(digest, prehashed_sig, public_key)
+    print("   ✓ Pre-hashed signing works!")
+    
+    # Test wrong digest
+    wrong_digest = create_message_digest(b"wrong message")
+    assert not verify_prehashed(wrong_digest, prehashed_sig, public_key)
+    print("   ✓ Wrong digest correctly rejected!")
     
     print("\n" + "="*50)
     print("All RSA-PSS tests passed! ✓")

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}SecureChat - Key Management{% endblock %}
+
+{% block nav_items %}
+<span class="nav-user" id="nav-user-info">
+    <span class="user-status online"></span>
+    <span id="current-user">Loading...</span>
+</span>
+<a href="{{ url_for('index') }}" class="nav-link">Home</a>
+<a href="{{ url_for('chat') }}" class="nav-link">Chat</a>
+<a href="{{ url_for('attack_lab') }}" class="nav-link">Attack Lab</a>
+<a href="{{ url_for('key_management') }}" class="nav-link active">Key Management</a>
+<button id="logout-btn" class="btn btn-sm btn-secondary">Logout</button>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>🔐 Key Management Dashboard</h1>
+    
+    <div class="dashboard-grid">
+        <!-- User Registration Card -->
+        <div class="dashboard-card">
+            <h2>User Registration</h2>
+            <div class="card-content">
+                <div class="form-group">
+                    <label for="new-user-id">User ID</label>
+                    <input type="text" id="new-user-id" class="form-control" placeholder="Enter user ID">
+                </div>
+                <button id="register-user-btn" class="btn btn-primary">Register User</button>
+                <div id="registration-status" class="status-message"></div>
+            </div>
+        </div>
+        
+        <!-- Public Key Display Card -->
+        <div class="dashboard-card">
+            <h2>Public Key Fingerprints</h2>
+            <div class="card-content">
+                <div id="public-keys-list">
+                    <div class="loading-keys">
+                        <div class="loading-spinner"></div>
+                        <span>Loading keys...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Active Sessions Card -->
+        <div class="dashboard-card">
+            <h2>Active Sessions</h2>
+            <div class="card-content">
+                <div id="sessions-list">
+                    <div class="loading-sessions">
+                        <div class="loading-spinner"></div>
+                        <span>Loading sessions...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Key Status Card -->
+        <div class="dashboard-card">
+            <h2>Key Status</h2>
+            <div class="card-content">
+                <div id="key-status-indicators">
+                    <div class="status-indicator">
+                        <span class="status-label">Active Keys:</span>
+                        <span id="active-keys-count" class="status-value">0</span>
+                    </div>
+                    <div class="status-indicator">
+                        <span class="status-label">Expired Keys:</span>
+                        <span id="expired-keys-count" class="status-value">0</span>
+                    </div>
+                    <div class="status-indicator">
+                        <span class="status-label">Revoked Keys:</span>
+                        <span id="revoked-keys-count" class="status-value">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Session Key Rotation Card -->
+        <div class="dashboard-card">
+            <h2>Session Key Rotation</h2>
+            <div class="card-content">
+                <div class="form-group">
+                    <label for="rotation-expiration">Expiration Time (minutes)</label>
+                    <input type="number" id="rotation-expiration" class="form-control" value="30" min="1">
+                </div>
+                <button id="rotate-session-btn" class="btn btn-warning">Rotate Session Key</button>
+                <div id="rotation-status" class="status-message"></div>
+                <div id="next-rotation-time" class="info-text"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="dashboard-actions">
+        <button id="generate-keys-btn" class="btn btn-success">Generate RSA Key Pair</button>
+        <button id="rotate-keys-btn" class="btn btn-warning">Rotate Keys</button>
+        <button id="revoke-keys-btn" class="btn btn-danger">Revoke Keys</button>
+    </div>
+</div>
+
+<!-- Confirmation Modal -->
+<div id="confirmation-modal" class="modal" style="display: none;">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>⚠️ Confirmation Required</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="confirmation-message">Are you sure you want to proceed?</p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="confirm-cancel">Cancel</button>
+            <button class="btn btn-primary" id="confirm-proceed">Proceed</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/key_management.js') }}"></script>
+{% endblock %}

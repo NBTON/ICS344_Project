@@ -10,6 +10,7 @@ This module defines the WebSocket event handlers for real-time messaging:
 
 import time
 from typing import Dict, Set, Optional
+from collections import defaultdict
 from flask import request
 from flask_socketio import emit, join_room, leave_room
 
@@ -22,7 +23,7 @@ from backend.middleware.rate_limiter import get_rate_limiter
 # Track connected users and their socket IDs
 connected_users: Dict[str, str] = {}  # user_id -> socket_id
 user_sockets: Dict[str, str] = {}      # socket_id -> user_id
-user_rooms: Dict[str, Set[str]] = {}   # user_id -> set of room_ids
+user_rooms: Dict[str, Set[str]] = defaultdict(set)   # user_id -> set of room_ids
 
 # Nonce cache for replay protection
 nonce_cache: Dict[str, float] = {}  # nonce_hex -> timestamp
@@ -158,7 +159,7 @@ def handle_register(data: dict):
     # Register the user
     connected_users[user_id] = socket_id
     user_sockets[socket_id] = user_id
-    user_rooms[user_id] = set()
+    # user_rooms is a defaultdict, so no need to manually initialize
     
     # Join user's personal room
     join_room(user_id)
@@ -223,6 +224,8 @@ def handle_join_session(data: dict):
     
     # Join the session room
     join_room(session_id)
+    if user_id not in user_rooms:
+        user_rooms[user_id] = set()
     user_rooms[user_id].add(session_id)
     
     emit('joined_session', {
@@ -359,33 +362,113 @@ def handle_message(data: dict):
         # Mark nonce as used
         mark_nonce_used(message.nonce)
         
+        # Get session key
+        session_key = km.get_session_key(session_id, user_id)
+        if not session_key:
+            emit('error', {
+                'type': 'session_key_missing',
+                'message': 'Session key not available'
+            })
+            return
+            
         # Determine recipient
         peer_id = session.user2_id if session.user1_id == user_id else session.user1_id
         
-        # Broadcast message to session room (including recipient)
-        emit('message', {
-            'session_id': session_id,
-            'sender_id': user_id,
-            'message': message_data,
-            'timestamp': time.time()
-        }, room=session_id, include_self=False)
+        # Verify message signature first
+        try:
+            # Convert hex strings to bytes
+            iv = bytes.fromhex(message.iv)
+            ciphertext = bytes.fromhex(message.ciphertext)
+            auth_tag = bytes.fromhex(message.auth_tag)
+            nonce = bytes.fromhex(message.nonce)
+            signature = bytes.fromhex(message.signature)
+            
+            # Get sender's public key for signature verification
+            # Note: message.sender_id should be the fingerprint of the sender's public key
+            sender_public_key = km.get_user_keys(user_id).public_key if user_id == message.sender_id.hex() else None
+            if not sender_public_key:
+                # Try to find by fingerprint
+                for stored_user in km.get_all_users():
+                    if stored_user['fingerprint'] == message.sender_id.hex():
+                        stored_keys = km.get_user_keys(stored_user['user_id'])
+                        sender_public_key = stored_keys.public_key
+                        break
+            
+            if not sender_public_key:
+                raise ValueError("Sender public key not found")
+                
+            # Verify RSA-PSS signature
+            signature_valid = verify_message_signature(
+                ciphertext=ciphertext,
+                iv=iv,
+                timestamp=message.timestamp,
+                nonce=nonce,
+                signature=signature,
+                public_key=sender_public_key
+            )
+            
+            if not signature_valid:
+                raise ValueError("Invalid message signature")
+                
+        except Exception as e:
+            emit('error', {
+                'type': 'signature_verification_failed',
+                'message': f'Signature verification failed: {str(e)}'
+            })
+            return
         
-        # Also send directly to recipient's personal room if they're online
-        if peer_id in connected_users:
+        # Decrypt message using AES-GCM
+        try:
+            # Decrypt message
+            decrypted_payload = decrypt(
+                ciphertext=ciphertext,
+                key=session_key,
+                iv=iv,
+                tag=auth_tag,
+                associated_data=message.sender_id + message.timestamp.to_bytes(8, 'big') + nonce
+            )
+            
+            # Process decrypted payload
+            processed_message = decrypted_payload.decode('utf-8')
+            
+            # Broadcast verified message to session room
             emit('message', {
                 'session_id': session_id,
                 'sender_id': user_id,
-                'message': message_data,
+                'message': processed_message,
+                'timestamp': message.timestamp,
+                'verified': True
+            }, room=session_id, include_self=False)
+            
+            # Also send directly to recipient's personal room if they're online
+            if peer_id in connected_users:
+                peer_socket_id = connected_users[peer_id]
+                emit('message', {
+                    'session_id': session_id,
+                    'sender_id': user_id,
+                    'message': processed_message,
+                    'timestamp': message.timestamp,
+                    'verified': True
+                }, room=peer_socket_id)
+            
+            # Log message routing for debugging
+            print(f"[WebSocket] Message from {user_id} to {peer_id} in session {session_id}")
+            print(f"[WebSocket] Session room: {session_id}, Peer online: {peer_id in connected_users}")
+            
+            # Confirm to sender
+            emit('message_sent', {
+                'session_id': session_id,
                 'timestamp': time.time()
-            }, room=peer_id)
-        
-        # Confirm to sender
-        emit('message_sent', {
-            'session_id': session_id,
-            'timestamp': time.time()
-        })
-        
-        print(f"[WebSocket] Message from {user_id} in session {session_id}")
+            })
+            
+            print(f"[WebSocket] Message from {user_id} in session {session_id}")
+            
+        except Exception as e:
+            print(f"[WebSocket] Error decrypting message: {e}")
+            emit('error', {
+                'type': 'decryption_error',
+                'message': f'Failed to decrypt message: {str(e)}'
+            })
         
     except ValueError as e:
         emit('error', {

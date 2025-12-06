@@ -13,7 +13,8 @@ In production, use secure key storage (HSM, encrypted database, etc.).
 import os
 import time
 import hashlib
-from typing import Dict, Optional, Tuple, Any
+import threading
+from typing import Dict, Optional, Tuple, Any, Set, List
 from dataclasses import dataclass, field
 
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -81,6 +82,8 @@ class KeyManager:
         self._users: Dict[str, UserKeys] = {}
         self._sessions: Dict[str, Session] = {}
         self._user_sessions: Dict[str, list] = {}  # user_id -> [session_ids]
+        self.revoked_keys: Set[bytes] = set()
+        self.audit_logs: List[Dict[str, Any]] = []
     
     def register_user(self, user_id: str) -> Dict[str, Any]:
         """
@@ -131,9 +134,16 @@ class KeyManager:
             user_id: The user's ID.
         
         Returns:
-            UserKeys or None: The user's keys if found.
+            UserKeys or None: The user's keys if found and key is not revoked.
         """
-        return self._users.get(user_id)
+        user = self._users.get(user_id)
+        if not user:
+            return None
+            
+        if user.fingerprint in self.revoked_keys:
+            return None
+            
+        return user
     
     def get_public_key(self, user_id: str) -> Optional[bytes]:
         """
@@ -143,23 +153,31 @@ class KeyManager:
             user_id: The user's ID.
         
         Returns:
-            bytes or None: PEM-encoded public key if user exists.
+            bytes or None: PEM-encoded public key if user exists and key is not revoked.
         """
         user = self._users.get(user_id)
-        return user.public_key_pem if user else None
+        if not user:
+            return None
+            
+        # Check if user's key is revoked
+        if user.fingerprint in self.revoked_keys:
+            return None
+            
+        return user.public_key_pem
     
     def get_all_users(self) -> list:
         """
         Get a list of all registered users.
         
         Returns:
-            list: List of dicts with user_id and fingerprint.
+            list: List of dicts with user_id, fingerprint, created_at, and revoked status.
         """
         return [
             {
                 'user_id': user.user_id,
                 'fingerprint': user.fingerprint.hex(),
-                'created_at': user.created_at
+                'created_at': user.created_at,
+                'revoked': user.fingerprint in self.revoked_keys
             }
             for user in self._users.values()
         ]
@@ -184,7 +202,7 @@ class KeyManager:
                 - expires_at: Session expiration timestamp
         
         Raises:
-            ValueError: If either user is not registered.
+            ValueError: If either user is not registered or has a revoked key.
         """
         # Validate users exist
         initiator = self._users.get(initiator_id)
@@ -194,6 +212,12 @@ class KeyManager:
             raise ValueError(f"Initiator '{initiator_id}' is not registered")
         if not recipient:
             raise ValueError(f"Recipient '{recipient_id}' is not registered")
+            
+        # Check if initiator or recipient's keys are revoked
+        if initiator.fingerprint in self.revoked_keys:
+            raise ValueError(f"Initiator '{initiator_id}' has a revoked key")
+        if recipient.fingerprint in self.revoked_keys:
+            raise ValueError(f"Recipient '{recipient_id}' has a revoked key")
         
         # Generate session key
         session_key = generate_aes_key()
@@ -218,6 +242,16 @@ class KeyManager:
         self._sessions[session_id] = session
         self._user_sessions[initiator_id].append(session_id)
         self._user_sessions[recipient_id].append(session_id)
+        
+        # Audit log
+        self.audit_logs.append({
+            'timestamp': time.time(),
+            'action': 'create_session',
+            'session_id': session_id,
+            'initiator_id': initiator_id,
+            'recipient_id': recipient_id,
+            'expires_at': session.expires_at
+        })
         
         # Encrypt session key for both users
         encrypted_for_initiator = encrypt_key(session_key, initiator.public_key)
@@ -257,6 +291,14 @@ class KeyManager:
         
         # Check user is part of session
         if user_id not in (session.user1_id, session.user2_id):
+            return None
+            
+        user = self._users.get(user_id)
+        if not user:
+            return None
+            
+        # Check if user's key is revoked
+        if user.fingerprint in self.revoked_keys:
             return None
         
         # Check session hasn't expired
@@ -304,6 +346,96 @@ class KeyManager:
         
         return active_sessions
     
+    def revoke_user_keys(self, user_id: str) -> None:
+        """
+        Revoke keys for a user by adding their fingerprint to revoked keys.
+        
+        Args:
+            user_id: The user ID to revoke keys for.
+        """
+        user = self._users.get(user_id)
+        if not user:
+            raise ValueError(f"User '{user_id}' not found")
+        
+        # Add fingerprint to revoked keys
+        self.revoked_keys.add(user.fingerprint)
+        
+        # Audit log
+        self.audit_logs.append({
+            'timestamp': time.time(),
+            'action': 'revoke_user_keys',
+            'user_id': user_id,
+            'fingerprint': user.fingerprint.hex()
+        })
+        
+        # Invalidate all sessions involving this user
+        for session_id in list(self._sessions.keys()):
+            session = self._sessions[session_id]
+            if user_id in (session.user1_id, session.user2_id):
+                self.revoke_session(session_id, user_id)
+
+    def _rotate_session_key(self, session_id: str) -> None:
+        """
+        Rotate the session key for a session with session fixation protection.
+        
+        Args:
+            session_id: The session ID to rotate.
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+            
+        # Generate new session key
+        new_session_key = generate_aes_key()
+        
+        # Generate new session ID to prevent fixation
+        new_session_id = hashlib.sha256(
+            f"{session.user1_id}:{session.user2_id}:{time.time()}:{os.urandom(16).hex()}".encode()
+        ).hexdigest()[:32]
+        
+        # Update session with new key, extended expiration, and new ID
+        now = time.time()
+        new_session = Session(
+            session_id=new_session_id,
+            user1_id=session.user1_id,
+            user2_id=session.user2_id,
+            session_key=new_session_key,
+            created_at=now,
+            expires_at=now + self._session_timeout
+        )
+        
+        # Re-encrypt keys for both users
+        initiator = self._users.get(new_session.user1_id)
+        recipient = self._users.get(new_session.user2_id)
+        
+        if initiator and recipient:
+            encrypted_for_initiator = encrypt_key(new_session_key, initiator.public_key)
+            encrypted_for_recipient = encrypt_key(new_session_key, recipient.public_key)
+            
+            # Sign the encrypted keys (initiator signs)
+            initiator_signature = sign(encrypted_for_recipient, initiator.private_key)
+            
+            # TODO: Implement notification to users about key rotation
+            # This would typically involve WebSocket updates or API calls
+            
+            # Audit log
+            self.audit_logs.append({
+                'timestamp': now,
+                'action': 'rotate_session_key',
+                'old_session_id': session_id,
+                'new_session_id': new_session_id,
+                'new_expires_at': new_session.expires_at
+            })
+        
+        # Store new session and update user session lists
+        self._sessions[new_session_id] = new_session
+        self._user_sessions[new_session.user1_id].append(new_session_id)
+        self._user_sessions[new_session.user2_id].append(new_session_id)
+        
+        # Remove old session
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+
     def revoke_session(self, session_id: str, user_id: str) -> bool:
         """
         Revoke a session.
@@ -331,6 +463,14 @@ class KeyManager:
             if uid in self._user_sessions and session_id in self._user_sessions[uid]:
                 self._user_sessions[uid].remove(session_id)
         
+        # Audit log
+        self.audit_logs.append({
+            'timestamp': time.time(),
+            'action': 'revoke_session',
+            'session_id': session_id,
+            'user_id': user_id
+        })
+        
         return True
     
     def cleanup_expired_sessions(self) -> int:
@@ -352,13 +492,21 @@ class KeyManager:
                 if uid in self._user_sessions and sid in self._user_sessions[uid]:
                     self._user_sessions[uid].remove(sid)
             del self._sessions[sid]
+            
+            # Audit log
+            self.audit_logs.append({
+                'timestamp': now,
+                'action': 'cleanup_expired_sessions',
+                'session_id': sid
+            })
         
         return len(expired)
     
     def decrypt_session_key_for_user(
         self,
         encrypted_key: bytes,
-        user_id: str
+        user_id: str,
+        sender_id: str = None
     ) -> Optional[bytes]:
         """
         Decrypt an encrypted session key for a user.
@@ -366,6 +514,7 @@ class KeyManager:
         Args:
             encrypted_key: The encrypted session key.
             user_id: The user whose private key should be used.
+            sender_id: The ID of the user who sent the encrypted key.
         
         Returns:
             bytes or None: The decrypted session key if successful.
@@ -373,9 +522,27 @@ class KeyManager:
         user = self._users.get(user_id)
         if not user:
             return None
+            
+        # Check if user's key is revoked
+        if user.fingerprint in self.revoked_keys:
+            return None
+            
+        # Check if sender's key is revoked
+        if sender_id:
+            sender_user = self._users.get(sender_id)
+            if sender_user and sender_user.fingerprint in self.revoked_keys:
+                return None
         
         try:
-            return decrypt_key(encrypted_key, user.private_key)
+            decrypted_key = decrypt_key(encrypted_key, user.private_key)
+            # Audit log
+            self.audit_logs.append({
+                'timestamp': time.time(),
+                'action': 'decrypt_session_key',
+                'user_id': user_id,
+                'sender_id': sender_id
+            })
+            return decrypted_key
         except Exception:
             return None
     
@@ -398,6 +565,10 @@ class KeyManager:
         """
         sender = self._users.get(sender_id)
         if not sender:
+            return False
+            
+        # Check if sender's key is revoked
+        if sender.fingerprint in self.revoked_keys:
             return False
         
         return verify(encrypted_key, signature, sender.public_key)
@@ -522,4 +693,67 @@ if __name__ == "__main__":
     
     print("\n" + "="*50)
     print("All Key Manager tests passed! ✓")
+    def _rotate_session_key(self, session_id: str) -> None:
+        """
+        Rotate the session key for a session with session fixation protection.
+        
+        Args:
+            session_id: The session ID to rotate.
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+            
+        # Generate new session key
+        new_session_key = generate_aes_key()
+        
+        # Generate new session ID to prevent fixation
+        new_session_id = hashlib.sha256(
+            f"{session.user1_id}:{session.user2_id}:{time.time()}:{os.urandom(16).hex()}".encode()
+        ).hexdigest()[:32]
+        
+        # Update session with new key, extended expiration, and new ID
+        now = time.time()
+        new_session = Session(
+            session_id=new_session_id,
+            user1_id=session.user1_id,
+            user2_id=session.user2_id,
+            session_key=new_session_key,
+            created_at=now,
+            expires_at=now + self._session_timeout
+        )
+        
+        # Re-encrypt keys for both users
+        initiator = self._users.get(new_session.user1_id)
+        recipient = self._users.get(new_session.user2_id)
+        
+        if initiator and recipient:
+            encrypted_for_initiator = encrypt_key(new_session_key, initiator.public_key)
+            encrypted_for_recipient = encrypt_key(new_session_key, recipient.public_key)
+            
+            # Sign the encrypted keys (initiator signs)
+            initiator_signature = sign(encrypted_for_recipient, initiator.private_key)
+            
+            # TODO: Implement notification to users about key rotation
+            # This would typically involve WebSocket updates or API calls
+            
+            # Audit log
+            self.audit_logs.append({
+                'timestamp': now,
+                'action': 'rotate_session_key',
+                'old_session_id': session_id,
+                'new_session_id': new_session_id,
+                'new_expires_at': new_session.expires_at
+            })
+        
+        # Store new session and update user session lists
+        self._sessions[new_session_id] = new_session
+        self._user_sessions[new_session.user1_id].append(new_session_id)
+        self._user_sessions[new_session.user2_id].append(new_session_id)
+        
+        # Remove old session and rotation timer
+        if session_id in self._sessions:
+            del self._sessions[session_id]
+        if session_id in self._rotation_timers:
+            del self._rotation_timers[session_id]
     print("="*50)
