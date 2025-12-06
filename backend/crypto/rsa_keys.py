@@ -26,34 +26,37 @@ PUBLIC_EXPONENT = 65537
 def generate_key_pair(key_size: int = DEFAULT_KEY_SIZE) -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
     """
     Generate an RSA key pair.
-    
+
     Args:
         key_size: The size of the key in bits. Defaults to 2048.
                   Must be at least 2048 for security.
-    
+
     Returns:
         tuple: A tuple containing (private_key, public_key).
-    
+
     Raises:
         ValueError: If key_size is less than 2048.
-    
-    Example:
-        >>> private_key, public_key = generate_key_pair()
-        >>> private_key.key_size
-        2048
     """
     if key_size < 2048:
         raise ValueError("Key size must be at least 2048 bits for security")
-    
+
     private_key = rsa.generate_private_key(
         public_exponent=PUBLIC_EXPONENT,
         key_size=key_size,
         backend=default_backend()
     )
-    
+
     public_key = private_key.public_key()
-    
+
     return private_key, public_key
+
+
+# Backwards-compatible alias
+def generate_rsa_keypair(bits: int = DEFAULT_KEY_SIZE):
+    """
+    Backwards-compatible alias for generate_key_pair.
+    """
+    return generate_key_pair(bits)
 
 
 def serialize_public_key(public_key: rsa.RSAPublicKey) -> bytes:
@@ -78,36 +81,22 @@ def serialize_public_key(public_key: rsa.RSAPublicKey) -> bytes:
     )
 
 
-def serialize_private_key(
-    private_key: rsa.RSAPrivateKey,
-    password: Optional[bytes] = None
-) -> bytes:
+def serialize_private_key(private_key, password: Optional[bytes] = None) -> bytes:
     """
-    Serialize an RSA private key to PEM format.
-    
+    Serialize a private key to PKCS#8 PEM. If password is provided the key is encrypted.
+
     Args:
-        private_key: The RSA private key to serialize.
-        password: Optional password to encrypt the private key.
-                  If None, the key is stored unencrypted.
-    
+        private_key: RSAPrivateKey object.
+        password: Optional password bytes to encrypt PEM.
+
     Returns:
-        bytes: The PEM-encoded private key.
-    
-    Example:
-        >>> private_key, public_key = generate_key_pair()
-        >>> pem = serialize_private_key(private_key)
-        >>> pem.startswith(b'-----BEGIN PRIVATE KEY-----')
-        True
-        >>> # With password protection
-        >>> pem_encrypted = serialize_private_key(private_key, b"secret")
-        >>> pem_encrypted.startswith(b'-----BEGIN ENCRYPTED PRIVATE KEY-----')
-        True
+        bytes: PEM-encoded private key.
     """
     if password is not None:
         encryption = serialization.BestAvailableEncryption(password)
     else:
         encryption = serialization.NoEncryption()
-    
+
     return private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,

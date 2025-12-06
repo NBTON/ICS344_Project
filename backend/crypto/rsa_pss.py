@@ -11,7 +11,7 @@ RSA-PSS (Probabilistic Signature Scheme) uses:
 """
 
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import padding, rsa, utils
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 
 
@@ -39,7 +39,8 @@ def sign(message: bytes, private_key: rsa.RSAPrivateKey, salt_length: int = None
         256  # RSA-2048 produces 256-byte signatures
     """
     if salt_length is None:
-        salt_length = padding.PSS.MAX_LENGTH
+        # Use SHA-256 digest size as PSS salt length (recommended fixed salt length)
+        salt_length = hashes.SHA256().digest_size
     
     try:
         signature = private_key.sign(
@@ -82,7 +83,8 @@ def verify(message: bytes, signature: bytes, public_key: rsa.RSAPublicKey, salt_
         False
     """
     if salt_length is None:
-        salt_length = padding.PSS.MAX_LENGTH
+        # Use SHA-256 digest size as PSS salt length (recommended fixed salt length)
+        salt_length = hashes.SHA256().digest_size
     
     try:
         public_key.verify(

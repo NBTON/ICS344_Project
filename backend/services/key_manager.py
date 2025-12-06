@@ -126,6 +126,140 @@ class KeyManager:
             'fingerprint': fingerprint.hex()
         }
     
+    def create_user_keypair(self, username: str, bits: int = 2048) -> None:
+        """
+        Create and store an RSA keypair for a user in-memory.
+        
+        Args:
+            username: Identifier for the user.
+            bits: RSA key size in bits (default: 2048).
+        
+        Raises:
+            ValueError: If username already exists or bits < 2048.
+        """
+        if username in self._users:
+            raise ValueError(f"User '{username}' is already registered")
+        # Generate RSA key pair
+        private_key, public_key = generate_key_pair(bits)
+        public_key_pem = serialize_public_key(public_key)
+        fingerprint = get_public_key_fingerprint(public_key)
+        user_keys = UserKeys(
+            user_id=username,
+            public_key=public_key,
+            private_key=private_key,
+            public_key_pem=public_key_pem,
+            fingerprint=fingerprint
+        )
+        self._users[username] = user_keys
+        self._user_sessions[username] = []
+
+    def import_private_key(self, username: str, pem: bytes, password: Optional[bytes] = None) -> None:
+        """
+        Import an existing private key PEM into the in-memory store for a user.
+        
+        Args:
+            username: Identifier for the user.
+            pem: PEM-encoded private key bytes.
+            password: Optional password if the PEM is encrypted.
+        
+        Raises:
+            ValueError: If username already exists or key loading fails.
+        """
+        if username in self._users:
+            raise ValueError(f"User '{username}' is already registered")
+        private_key = load_private_key(pem, password)
+        public_key = private_key.public_key()
+        public_key_pem = serialize_public_key(public_key)
+        fingerprint = get_public_key_fingerprint(public_key)
+        user_keys = UserKeys(
+            user_id=username,
+            public_key=public_key,
+            private_key=private_key,
+            public_key_pem=public_key_pem,
+            fingerprint=fingerprint
+        )
+        self._users[username] = user_keys
+        self._user_sessions[username] = []
+
+    def export_private_key(self, username: str, password: Optional[bytes] = None) -> bytes:
+        """
+        Export a user's private key as PKCS#8 PEM. Keys are kept in-memory by default;
+        this function provides an explicit export mechanism.
+        
+        Args:
+            username: Identifier for the user.
+            password: Optional password to encrypt the exported PEM.
+        
+        Returns:
+            bytes: PEM-encoded private key.
+        
+        Raises:
+            ValueError: If user not found.
+        """
+        user = self._users.get(username)
+        if not user:
+            raise ValueError(f"User '{username}' not found")
+        return serialize_private_key(user.private_key, password)
+
+    def get_public_key_object(self, username: str) -> Optional[rsa.RSAPublicKey]:
+        """
+        Return the RSA public key object for a user (in-memory).
+        
+        Args:
+            username: Identifier for the user.
+        
+        Returns:
+            RSAPublicKey or None: The public key object if available and not revoked.
+        """
+        user = self._users.get(username)
+        if not user:
+            return None
+        if user.fingerprint in self.revoked_keys:
+            return None
+        return user.public_key
+
+    def wrap_session_key(self, username: str, session_key: bytes) -> bytes:
+        """
+        Encrypt (wrap) a session key for a user using their RSA public key (OAEP).
+        
+        Args:
+            username: Recipient username whose public key will be used.
+            session_key: The session key to wrap.
+        
+        Returns:
+            bytes: Encrypted (wrapped) session key.
+        
+        Raises:
+            ValueError: If user not found or key revoked.
+        """
+        user = self._users.get(username)
+        if not user:
+            raise ValueError(f"User '{username}' not found")
+        if user.fingerprint in self.revoked_keys:
+            raise ValueError(f"User '{username}' has a revoked key")
+        return encrypt_key(session_key, user.public_key)
+
+    def unwrap_session_key(self, username: str, wrapped: bytes) -> bytes:
+        """
+        Decrypt (unwrap) a wrapped session key using the user's private key.
+        
+        Args:
+            username: Username whose private key will be used.
+            wrapped: Encrypted session key bytes.
+        
+        Returns:
+            bytes: The decrypted session key.
+        
+        Raises:
+            ValueError: If user not found or unwrap/decryption fails.
+        """
+        user = self._users.get(username)
+        if not user:
+            raise ValueError(f"User '{username}' not found")
+        if user.fingerprint in self.revoked_keys:
+            raise ValueError(f"User '{username}' has a revoked key")
+        return decrypt_key(wrapped, user.private_key)
+
     def get_user_keys(self, user_id: str) -> Optional[UserKeys]:
         """
         Get a user's key information.

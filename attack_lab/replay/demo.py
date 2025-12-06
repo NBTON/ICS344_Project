@@ -112,6 +112,7 @@ def _run_vulnerable_demo(attacker: ReplayAttacker) -> Dict[str, Any]:
     return {
         "attack_type": "replay",
         "with_defense": False,
+        "defense_status": "disabled",
         "steps": steps,
         "logs": logs,
         "attack_success": True,
@@ -210,6 +211,7 @@ def _run_defended_demo(attacker: ReplayAttacker) -> Dict[str, Any]:
     return {
         "attack_type": "replay",
         "with_defense": True,
+        "defense_status": "enabled",
         "steps": steps,
         "logs": logs,
         "attack_success": False,
